@@ -30,17 +30,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "conversation_not_found" }, { status: 404 });
   }
 
-  try {
-    if (conversation.stage === "identifying") {
+  if (conversation.stage === "identifying") {
+    try {
       const result = await identifyCustomer(conversationId, message);
       return NextResponse.json(result);
+    } catch (err) {
+      console.error("chat pipeline failed", err);
+      const detail = err instanceof Error ? err.message : "unknown error";
+      return NextResponse.json({ error: "pipeline_failed", detail }, { status: 502 });
     }
-
-    const result = await runTurn(message, conversationId);
-    return NextResponse.json(result);
-  } catch (err) {
-    console.error("chat pipeline failed", err);
-    const detail = err instanceof Error ? err.message : "unknown error";
-    return NextResponse.json({ error: "pipeline_failed", detail }, { status: 502 });
   }
+
+  // Active stage: stream each engine's result as its own NDJSON line the
+  // moment it resolves, rather than buffering both into one JSON response —
+  // that's what lets the client render Jev's card well before the LLM's.
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        await runTurn(message, conversationId, (result) => {
+          controller.enqueue(encoder.encode(JSON.stringify(result) + "\n"));
+        });
+      } catch (err) {
+        console.error("chat pipeline failed", err);
+        const detail = err instanceof Error ? err.message : "unknown error";
+        controller.enqueue(encoder.encode(JSON.stringify({ turnError: detail }) + "\n"));
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8" } });
 }

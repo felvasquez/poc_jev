@@ -9,6 +9,7 @@ export interface AppSettings {
   jevModel: string;
   jevInstructions: string;
   jevClarifyInstructions: string;
+  jevAngerInstructions: string;
   clarifyThreshold: number;
   llmModel: string;
   llmSystemPromptPrefix: string;
@@ -31,6 +32,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   jevInstructions: "¿Sobre qué producto o servicio bancario es esta consulta?",
   jevClarifyInstructions:
     "¿El mensaje es ambiguo entre dos o más de estas categorías, o no encaja en ninguna? Ignora si faltan detalles para responder la consulta (qué tarjeta, qué fecha, qué monto); solo importa si se puede elegir la categoría a la que derivar.",
+  jevAngerInstructions: "¿Qué tan enojado o frustrado está el cliente en este mensaje?",
   clarifyThreshold: 0.5,
   llmModel: "gpt-5.6-luna",
   llmSystemPromptPrefix:
@@ -48,6 +50,7 @@ export async function getSettings(): Promise<AppSettings> {
       jevModel: row.jevModel,
       jevInstructions: row.jevInstructions,
       jevClarifyInstructions: row.jevClarifyInstructions,
+      jevAngerInstructions: row.jevAngerInstructions,
       clarifyThreshold: row.clarifyThreshold,
       llmModel: row.llmModel,
       llmSystemPromptPrefix: row.llmSystemPromptPrefix,

@@ -19,6 +19,7 @@ const bodySchema = z.object({
   jevModel: z.string().min(1).max(100),
   jevInstructions: z.string().min(1).max(2000),
   jevClarifyInstructions: z.string().min(1).max(2000),
+  jevAngerInstructions: z.string().min(1).max(2000),
   clarifyThreshold: z.number().min(0).max(1),
   llmModel: z.string().min(1).max(100),
   llmSystemPromptPrefix: z.string().min(1).max(4000),

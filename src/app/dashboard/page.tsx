@@ -14,6 +14,7 @@ interface EngineStats {
   totalCostUsd: number;
   avgConfidence: number | null;
   ambiguousRate: number;
+  avgAngerScore: number | null;
 }
 
 interface CategoryStats {
@@ -31,6 +32,7 @@ interface RecentTurn {
   category: string;
   confidence: number | null;
   needsMoreContext: boolean;
+  angerScore: number | null;
   latencyMs: number;
   costUsd: string;
   createdAt: string;
@@ -43,6 +45,26 @@ interface MetricsResponse {
 }
 
 const ENGINE_LABEL: Record<Engine, string> = { jev: "Jev", llm: "LLM" };
+
+// A percentage saturates near "-100%" for anything past ~10x and can't show
+// a 50x vs. 100x difference — exactly the range Jev's latency/cost claims
+// live in. A ratio (llm / jev) reads directly as "Jev is Nx faster/cheaper".
+// The color alone can't disambiguate direction (green "6x" could mean "6x
+// faster" or misread as "6x slower"), so the winner/loser word is spelled
+// out in the label itself, not left to the accent color.
+function computeMultiplier(
+  jevVal: number,
+  llmVal: number,
+  winWord: string,
+  loseWord: string,
+): { text: string; jevWins: boolean } | null {
+  if (jevVal <= 0 || llmVal <= 0) return null;
+  const jevWins = jevVal <= llmVal;
+  const ratio = jevWins ? llmVal / jevVal : jevVal / llmVal;
+  const magnitude = `${ratio.toFixed(ratio >= 10 ? 0 : 1)}x`;
+  const text = jevWins ? `${magnitude} ${winWord}` : `${magnitude} ${loseWord} (LLM)`;
+  return { text, jevWins };
+}
 
 export default function Dashboard() {
   const [data, setData] = useState<MetricsResponse | null>(null);
@@ -109,6 +131,9 @@ export default function Dashboard() {
     { label: "Costo promedio", jev: jev?.avgCostUsd ?? null, llm: llm?.avgCostUsd ?? null },
   ];
 
+  const latencyMultiplier =
+    jev && llm ? computeMultiplier(jev.avgLatencyMs, llm.avgLatencyMs, "más rápido", "más lento") : null;
+  const costMultiplier = jev && llm ? computeMultiplier(jev.avgCostUsd, llm.avgCostUsd, "más barato", "más caro") : null;
   const latencySavingsPct =
     jev && llm && llm.avgLatencyMs > 0 ? ((llm.avgLatencyMs - jev.avgLatencyMs) / llm.avgLatencyMs) * 100 : null;
   const costSavingsPct =
@@ -123,19 +148,21 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {latencySavingsPct !== null && costSavingsPct !== null && (
+      {latencyMultiplier !== null && costMultiplier !== null && latencySavingsPct !== null && costSavingsPct !== null && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <StatTile
-            label="Ahorro de latencia (Jev vs LLM)"
-            hint="Cuánto más rápido es Jev en promedio respecto al LLM, sobre las mismas consultas. Verde = Jev más rápido. Rojo con '+' = Jev fue más lento en esta muestra (con pocos turnos puede pasar por ruido)."
-            value={`${latencySavingsPct >= 0 ? "-" : "+"}${Math.abs(latencySavingsPct).toFixed(0)}%`}
-            accent={latencySavingsPct >= 0 ? "#0ca30c" : "#d03b3b"}
+            label="Latencia: Jev vs LLM"
+            hint="Cuántas veces más rápido es el motor ganador en promedio, sobre las mismas consultas, con el ahorro porcentual debajo. Verde = Jev gana. Rojo = LLM gana (con pocos turnos puede pasar por ruido)."
+            value={latencyMultiplier.text}
+            sub={`${latencySavingsPct >= 0 ? "-" : "+"}${Math.abs(latencySavingsPct).toFixed(0)}%`}
+            accent={latencyMultiplier.jevWins ? "#0ca30c" : "#d03b3b"}
           />
           <StatTile
-            label="Ahorro de costo (Jev vs LLM)"
-            hint="Cuánto más barato es Jev en promedio respecto al LLM, sobre las mismas consultas. Verde = Jev más barato."
-            value={`${costSavingsPct >= 0 ? "-" : "+"}${Math.abs(costSavingsPct).toFixed(0)}%`}
-            accent={costSavingsPct >= 0 ? "#0ca30c" : "#d03b3b"}
+            label="Costo: Jev vs LLM"
+            hint="Cuántas veces más barato es el motor ganador en promedio, sobre las mismas consultas, con el ahorro porcentual debajo. Verde = Jev gana."
+            value={costMultiplier.text}
+            sub={`${costSavingsPct >= 0 ? "-" : "+"}${Math.abs(costSavingsPct).toFixed(0)}%`}
+            accent={costMultiplier.jevWins ? "#0ca30c" : "#d03b3b"}
           />
           <StatTile
             label="Turnos Jev"
@@ -185,6 +212,14 @@ export default function Dashboard() {
                       label="Confianza prom."
                       hint="Solo Jev: probabilidad promedio que el modelo le asigna a la categoría elegida (0-100%), calibrada para reflejar precisión real. El LLM no expone una confianza calibrada, por eso no aparece este dato para ese motor."
                       value={`${(stats.avgConfidence * 100).toFixed(0)}%`}
+                    />
+                  )}
+                  {stats.avgAngerScore !== null && (
+                    <StatTile
+                      label="Enojo prom."
+                      hint="Solo Jev: nivel de enojo/frustración promedio del cliente en el mensaje (0-100%), de una pregunta score dedicada sobre un rubric de 4 niveles. El LLM no responde esta pregunta, por eso no aparece este dato para ese motor."
+                      value={`${(stats.avgAngerScore * 100).toFixed(0)}%`}
+                      accent={stats.avgAngerScore >= 0.5 ? "#d03b3b" : undefined}
                     />
                   )}
                   <StatTile
@@ -273,6 +308,9 @@ export default function Dashboard() {
               <th className="py-1.5 text-right font-normal" title="Solo Jev expone esta métrica, calibrada por el modelo.">
                 Confianza
               </th>
+              <th className="py-1.5 text-right font-normal" title="Solo Jev expone esta métrica, de una pregunta score dedicada.">
+                Enojo
+              </th>
               <th
                 className="py-1.5 text-center font-normal"
                 title="El motor marcó que hacía falta pedirle más contexto al cliente antes de derivar."
@@ -286,7 +324,7 @@ export default function Dashboard() {
           <tbody className="tabular-nums">
             {data.recent.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-3 text-center text-zinc-500">
+                <td colSpan={8} className="py-3 text-center text-zinc-500">
                   Sin datos todavía.
                 </td>
               </tr>
@@ -305,6 +343,9 @@ export default function Dashboard() {
                 <td className="py-1.5 text-zinc-900 dark:text-zinc-50">{categoryLabel(t.category)}</td>
                 <td className="py-1.5 text-right text-zinc-600 dark:text-zinc-400">
                   {t.confidence !== null ? `${(t.confidence * 100).toFixed(0)}%` : "—"}
+                </td>
+                <td className="py-1.5 text-right text-zinc-600 dark:text-zinc-400">
+                  {t.angerScore !== null ? `${(t.angerScore * 100).toFixed(0)}%` : "—"}
                 </td>
                 <td className="py-1.5 text-center">{t.needsMoreContext ? "⚠️" : ""}</td>
                 <td className="py-1.5 text-right text-zinc-600 dark:text-zinc-400">{t.latencyMs}ms</td>

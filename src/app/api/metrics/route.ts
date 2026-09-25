@@ -18,6 +18,7 @@ export async function GET() {
       totalCostUsd: sql<number>`sum(${turnMetrics.costUsd})::float`,
       avgConfidence: sql<number | null>`avg(${turnMetrics.confidence})::float`,
       ambiguousRate: sql<number>`avg(case when ${turnMetrics.needsMoreContext} then 1.0 else 0.0 end)::float`,
+      avgAngerScore: sql<number | null>`avg(${turnMetrics.angerScore})::float`,
     })
     .from(turnMetrics)
     .groupBy(turnMetrics.engine);
@@ -42,6 +43,7 @@ export async function GET() {
       category: turnMetrics.category,
       confidence: turnMetrics.confidence,
       needsMoreContext: turnMetrics.needsMoreContext,
+      angerScore: turnMetrics.angerScore,
       latencyMs: turnMetrics.latencyMs,
       costUsd: turnMetrics.costUsd,
       createdAt: turnMetrics.createdAt,

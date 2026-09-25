@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { SERIES_COLOR } from "@/components/grouped-bar-chart";
 import { CONVERSATION_ID_KEY } from "@/lib/storage-keys";
@@ -11,15 +11,35 @@ interface EngineResult {
   confidence: number | null;
   needsMoreContext: boolean;
   clarifyProbability: number | null;
+  angerScore: number | null;
+  angerLevel: number | null;
+  angerLabel: string | null;
   latencyMs: number;
   costUsd: number;
   request?: unknown;
   response?: unknown;
 }
 
+interface EngineError {
+  engine: "jev" | "llm";
+  error: string;
+}
+
+// null = still streaming in, hasn't resolved yet.
+type EngineSlot = EngineResult | EngineError | null;
+
+// Color scales with the rubric level Jev actually returned (1-3) — not with
+// an angerScore cutoff we'd be inventing on top of it. Level 0 (neutral)
+// renders nothing, same as the other badges below.
+const ANGER_BADGE_CLASS: Record<number, string> = {
+  1: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  2: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+  3: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300",
+};
+
 type Entry =
   | { kind: "text"; role: "user" | "assistant"; content: string }
-  | { kind: "comparison"; jev: EngineResult; llm: EngineResult };
+  | { kind: "comparison"; jev: EngineSlot; llm: EngineSlot };
 
 const ENGINE_LABEL: Record<"jev" | "llm", string> = { jev: "Jev", llm: "LLM" };
 
@@ -138,7 +158,7 @@ function JsonPane({ title, value }: { title: string; value: unknown }) {
         <span className="text-xs font-medium text-zinc-600 dark:text-zinc-300">{title}</span>
         <CopyButton value={json} />
       </div>
-      <pre className="flex-1 overflow-auto px-4 pb-4 font-mono text-[11.5px] leading-relaxed text-zinc-400 dark:text-zinc-600">
+      <pre className="flex-1 overflow-auto whitespace-pre-wrap break-words px-4 pb-4 font-mono text-xs leading-relaxed text-zinc-400 dark:text-zinc-600">
         <JsonCode value={value} />
       </pre>
     </div>
@@ -179,7 +199,7 @@ function DetailModal({
         aria-modal="true"
         aria-label={`Request y response — ${ENGINE_LABEL[result.engine]}`}
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
+        className="flex h-[90vh] w-[95vw] max-w-6xl flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-900"
       >
         <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
           <div>
@@ -192,6 +212,11 @@ function DetailModal({
               {result.confidence !== null && <span>confianza: {(result.confidence * 100).toFixed(0)}%</span>}
               {result.clarifyProbability !== null && (
                 <span>noul ambigüedad: {(result.clarifyProbability * 100).toFixed(0)}%</span>
+              )}
+              {result.angerLabel !== null && (
+                <span>
+                  score enojo: {result.angerLabel} ({(result.angerScore! * 100).toFixed(0)}%)
+                </span>
               )}
               <span>latencia: {result.latencyMs.toFixed(0)}ms</span>
               <span>costo: ${result.costUsd.toFixed(6)}</span>
@@ -216,16 +241,58 @@ function DetailModal({
   );
 }
 
-function EngineCard({ result, categoryLabel }: { result: EngineResult; categoryLabel: (key: string) => string }) {
+function EngineCardShell({ engine, children }: { engine: "jev" | "llm"; children: ReactNode }) {
+  const color = SERIES_COLOR[engine].light;
+  return (
+    <div className="flex-1 rounded-xl border border-zinc-200 bg-white p-3 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="mb-1 flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{ENGINE_LABEL[engine]}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function EngineCard({
+  engine,
+  result,
+  categoryLabel,
+}: {
+  engine: "jev" | "llm";
+  result: EngineSlot;
+  categoryLabel: (key: string) => string;
+}) {
   const [open, setOpen] = useState(false);
-  const color = SERIES_COLOR[result.engine].light;
+
+  // Still in flight — this is the whole point: Jev's slot fills in first,
+  // the LLM's stays here until its (much slower) response lands.
+  if (result === null) {
+    return (
+      <EngineCardShell engine={engine}>
+        <p className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-500 dark:border-zinc-700 dark:border-t-zinc-400" />
+          Derivando…
+        </p>
+      </EngineCardShell>
+    );
+  }
+
+  if ("error" in result) {
+    return (
+      <EngineCardShell engine={engine}>
+        <p className="text-xs text-red-700 dark:text-red-400">Error: {result.error}</p>
+      </EngineCardShell>
+    );
+  }
+
   const hasDetail = result.request !== undefined || result.response !== undefined;
 
   return (
     <div className="flex-1 rounded-xl border border-zinc-200 bg-white p-3 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <div className="mb-1 flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{ENGINE_LABEL[result.engine]}</span>
+        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: SERIES_COLOR[engine].light }} />
+        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{ENGINE_LABEL[engine]}</span>
       </div>
       <p className="font-medium text-zinc-900 dark:text-zinc-50">
         Derivación: {categoryLabel(result.category)}
@@ -235,11 +302,24 @@ function EngineCard({ result, categoryLabel }: { result: EngineResult; categoryL
           ⚠️ Necesita más contexto
         </p>
       )}
+      {result.angerLevel !== null && result.angerLevel > 0 && (
+        <p
+          title="Nivel del rubric de enojo/frustración que Jev asignó a este mensaje (texto tal cual lo devuelve la pregunta score)"
+          className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${ANGER_BADGE_CLASS[result.angerLevel]}`}
+        >
+          😠 {result.angerLabel}
+        </p>
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-zinc-200 pt-2 text-[11px] text-zinc-500 dark:border-zinc-800">
         {result.confidence !== null && <span>confianza: {(result.confidence * 100).toFixed(0)}%</span>}
         {result.clarifyProbability !== null && (
           <span title="Probabilidad de que el mensaje sea ambiguo entre categorías (respuesta del noul de ambigüedad)">
             noul ambigüedad: {(result.clarifyProbability * 100).toFixed(0)}%
+          </span>
+        )}
+        {result.angerLabel !== null && (
+          <span title="Nivel del rubric de enojo/frustración que Jev asignó a este mensaje, con el score normalizado entre paréntesis">
+            enojo: {result.angerLabel} ({(result.angerScore! * 100).toFixed(0)}%)
           </span>
         )}
         <span>latencia: {result.latencyMs.toFixed(0)}ms</span>
@@ -349,13 +429,45 @@ export default function Chat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, conversationId }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail ?? data.error ?? "Error desconocido");
 
-      if (data.jev && data.llm) {
-        setEntries((e) => [...e, { kind: "comparison", jev: data.jev, llm: data.llm }]);
-      } else {
+      const isStream = res.headers.get("content-type")?.includes("ndjson");
+      if (!isStream) {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail ?? data.error ?? "Error desconocido");
         setEntries((e) => [...e, { kind: "text", role: "assistant", content: data.reply }]);
+        return;
+      }
+
+      if (!res.body) throw new Error("Respuesta sin body de streaming");
+
+      // Placeholder pair — each slot fills in independently as its own
+      // NDJSON line arrives, instead of waiting for both engines together.
+      setEntries((e) => [...e, { kind: "comparison", jev: null, llm: null }]);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newlineIndex: number;
+        while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+          if (!line) continue;
+          const parsed = JSON.parse(line);
+          if ("turnError" in parsed) {
+            setError(parsed.turnError);
+            continue;
+          }
+          setEntries((entries) => {
+            const last = entries[entries.length - 1];
+            if (last.kind !== "comparison") return entries;
+            const updated = { ...last, [parsed.engine]: parsed };
+            return [...entries.slice(0, -1), updated];
+          });
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error desconocido");
@@ -384,8 +496,8 @@ export default function Chat() {
           if (entry.kind === "comparison") {
             return (
               <div key={i} className="flex gap-3">
-                <EngineCard result={entry.jev} categoryLabel={categoryLabel} />
-                <EngineCard result={entry.llm} categoryLabel={categoryLabel} />
+                <EngineCard engine="jev" result={entry.jev} categoryLabel={categoryLabel} />
+                <EngineCard engine="llm" result={entry.llm} categoryLabel={categoryLabel} />
               </div>
             );
           }
@@ -404,7 +516,6 @@ export default function Chat() {
           );
         })}
         {starting && <p className="text-sm text-zinc-500">Iniciando conversación…</p>}
-        {loading && <p className="text-sm text-zinc-500">Derivando con Jev y LLM…</p>}
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <div ref={bottomRef} />
       </div>

@@ -69,6 +69,10 @@ export const turnMetrics = pgTable("turn_metrics", {
   // no raw probability available (clarifyProbability stays null).
   needsMoreContext: boolean("needs_more_context").notNull().default(false),
   clarifyProbability: real("clarify_probability"),
+  // Normalized 0-1 anger/frustration level (Jev only, from a dedicated
+  // `score` question over the same rubric as ANGER_CRITERIA in lib/jev.ts).
+  // The LLM engine has no equivalent question, so this stays null for it.
+  angerScore: real("anger_score"),
   model: text("model").notNull(),
   latencyMs: integer("latency_ms").notNull(),
   inputTokens: integer("input_tokens").notNull(),
@@ -94,6 +98,11 @@ export const settings = pgTable("settings", {
   jevModel: text("jev_model").notNull(),
   jevInstructions: text("jev_instructions").notNull(),
   jevClarifyInstructions: text("jev_clarify_instructions").notNull(),
+  // DB-level default backfills the existing settings row on push; the app
+  // always supplies its own value on insert/update (see DEFAULT_SETTINGS).
+  jevAngerInstructions: text("jev_anger_instructions")
+    .notNull()
+    .default("¿Qué tan enojado o frustrado está el cliente en este mensaje?"),
   clarifyThreshold: real("clarify_threshold").notNull(),
   llmModel: text("llm_model").notNull(),
   llmSystemPromptPrefix: text("llm_system_prompt_prefix").notNull(),

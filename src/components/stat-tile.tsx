@@ -1,11 +1,13 @@
 export function StatTile({
   label,
   value,
+  sub,
   accent,
   hint,
 }: {
   label: string;
   value: string;
+  sub?: string;
   accent?: string;
   hint?: string;
 }) {
@@ -23,6 +25,7 @@ export function StatTile({
       >
         {value}
       </p>
+      {sub && <p className="mt-0.5 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">{sub}</p>}
     </div>
   );
 }

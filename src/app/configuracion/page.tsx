@@ -13,6 +13,7 @@ interface AppSettings {
   jevModel: string;
   jevInstructions: string;
   jevClarifyInstructions: string;
+  jevAngerInstructions: string;
   clarifyThreshold: number;
   llmModel: string;
   llmSystemPromptPrefix: string;
@@ -164,6 +165,15 @@ export default function Configuracion() {
           <textarea
             value={settings.jevClarifyInstructions}
             onChange={(e) => setSettings({ ...settings, jevClarifyInstructions: e.target.value })}
+            rows={2}
+            className={`mt-1 ${inputClass}`}
+          />
+        </label>
+        <label className="block text-xs text-zinc-500 dark:text-zinc-400">
+          Pregunta de enojo (score, evaluada en el mismo request que la choice)
+          <textarea
+            value={settings.jevAngerInstructions}
+            onChange={(e) => setSettings({ ...settings, jevAngerInstructions: e.target.value })}
             rows={2}
             className={`mt-1 ${inputClass}`}
           />

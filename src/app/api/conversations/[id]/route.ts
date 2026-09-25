@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { conversations, messages, turnMetrics, type Engine } from "@/db/schema";
+import { angerFromResponse } from "@/lib/jev";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,9 @@ interface EngineEntry {
   confidence: number | null;
   needsMoreContext: boolean;
   clarifyProbability: number | null;
+  angerScore: number | null;
+  angerLevel: number | null;
+  angerLabel: string | null;
   latencyMs: number;
   costUsd: number;
   request: unknown;
@@ -56,6 +60,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   for (const msg of msgs) {
     const pair = msg.role === "user" ? byUserMessage.get(msg.id) : undefined;
     if (pair?.jev && pair?.llm) {
+      // angerLevel/angerLabel aren't their own columns — derived here from the
+      // stored raw response so the replayed label always matches what Jev
+      // actually said, rather than a copy that could drift from it.
+      const anger = angerFromResponse(pair.jev.rawResponse);
       entries.push({ kind: "text", role: "user", content: msg.content });
       entries.push({
         kind: "comparison",
@@ -65,6 +73,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           confidence: pair.jev.confidence,
           needsMoreContext: pair.jev.needsMoreContext,
           clarifyProbability: pair.jev.clarifyProbability,
+          angerScore: pair.jev.angerScore,
+          angerLevel: anger?.angerLevel ?? null,
+          angerLabel: anger?.angerLabel ?? null,
           latencyMs: pair.jev.latencyMs,
           costUsd: Number(pair.jev.costUsd),
           request: pair.jev.rawRequest,
@@ -76,6 +87,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           confidence: pair.llm.confidence,
           needsMoreContext: pair.llm.needsMoreContext,
           clarifyProbability: pair.llm.clarifyProbability,
+          angerScore: pair.llm.angerScore,
+          angerLevel: null,
+          angerLabel: null,
           latencyMs: pair.llm.latencyMs,
           costUsd: Number(pair.llm.costUsd),
           request: pair.llm.rawRequest,
